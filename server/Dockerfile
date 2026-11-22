@@ -15,6 +15,7 @@ RUN pip install faster-qwen3-tts==0.5.4 transformers==5.15.1 wyoming==1.11.0 \
 
 # Jobs may run as any uid (compose RUN_AS); torch and HF need a user name and a writable home.
 ENV USER=glados HOME=/tmp
+LABEL org.opencontainers.image.source=https://github.com/MyrikLD/glados-tts
 COPY server.py /app/server.py
 EXPOSE 10200
 CMD ["python", "/app/server.py"]

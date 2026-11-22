@@ -6,6 +6,7 @@ on:
     paths: &paths
       - "train/**"
       - "server/**"
+      - "server-gguf/**"
       - ".github/workflows/images.yml"
   pull_request:
     paths: *paths
@@ -43,11 +44,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # One job builds both images in turn, so the second one reuses the torch layer of the first.
+      # One job builds the images in turn, so server reuses the torch layer of train.
       - name: Build
         run: |
           OWNER=${GITHUB_REPOSITORY_OWNER,,}
-          for name in train server; do
+          for name in train server server-gguf; do
             image=ghcr.io/$OWNER/glados-tts-$name
             docker build -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" "$name"
           done
@@ -57,6 +58,6 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           OWNER=${GITHUB_REPOSITORY_OWNER,,}
-          for name in train server; do
+          for name in train server server-gguf; do
             docker push --all-tags "ghcr.io/$OWNER/glados-tts-$name"
           done

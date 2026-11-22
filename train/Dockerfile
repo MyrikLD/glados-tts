@@ -22,9 +22,16 @@ RUN git clone https://github.com/QwenLM/Qwen3-TTS.git /opt/Qwen3-TTS \
  && mkdir -p /app \
  && cp -r /opt/Qwen3-TTS/finetuning /app/finetuning
 
+# export_gguf.py runs the GGUF converters of the qwen3-tts.cpp commit that server-gguf builds.
+ARG QWEN3_TTS_CPP_COMMIT=8fa5b30604b67b82fd9df7c30c91e78b42b54571
+RUN pip install gguf==0.19.0 tqdm==4.70.1 \
+ && git clone https://github.com/predict-woo/qwen3-tts.cpp.git /opt/qwen3-tts.cpp \
+ && git -C /opt/qwen3-tts.cpp checkout "$QWEN3_TTS_CPP_COMMIT"
+
 # Jobs may run as any uid (compose RUN_AS); torch and HF need a user name and a writable home.
 ENV USER=glados HOME=/tmp
-COPY prep.py stt.py textnorm.py train.py /app/
+LABEL org.opencontainers.image.source=https://github.com/MyrikLD/glados-tts
+COPY export_gguf.py prep.py stt.py textnorm.py train.py /app/
 COPY eval /app/eval
 WORKDIR /app
 CMD ["python", "/app/train.py"]

@@ -62,6 +62,12 @@ docker compose -f train.compose.yml --profile prep up prep
 RUN=run1 STT_URI=tcp://... docker compose -f train.compose.yml up train
 ```
 
+3. `export` (optional, for `server-gguf`): converts one checkpoint to GGUF into `<CKPT>/gguf-q8_0/`.
+
+```sh
+CKPT=/data/ft/ru/run1/checkpoint-epoch-4 docker compose -f train.compose.yml --profile export run --rm export
+```
+
 The upstream `finetuning/sft_12hz.py` does not train correctly as published. `train.py` patches it at run time (see `PATCHES`). Without the patches the 0.6B model crashes or learns to output silence that never ends.
 
 ## Server
@@ -73,15 +79,41 @@ VOICE_LANG=ru DATA_DIR=... CKPT=/data/ft/ru/run1/checkpoint-epoch-4 RENDER_GID=$
 
 Add it in Home Assistant as a Wyoming integration on port 10200. Text is split into sentences, and each sentence is streamed in chunks of 8 codec frames. The first audio comes in about 450 ms on an RX 7900 XTX. The process uses about 4.5 GiB of VRAM.
 
+### GGUF server
+
+`server-gguf` runs the same checkpoint through [qwen3-tts.cpp](https://github.com/predict-woo/qwen3-tts.cpp) on Vulkan. The image is about 0.55 GB instead of 17 GB, and it needs only `/dev/dri`.
+
+```sh
+VOICE_LANG=ru DATA_DIR=... MODEL_DIR=/data/ft/ru/run1/checkpoint-epoch-4/gguf-q8_0 RENDER_GID=$(getent group render | cut -d: -f3) \
+  docker compose -f deploy/server-gguf.compose.yml up -d
+```
+
+On an RX 9070 XT, with the same checkpoint and phrases, the two servers compare as follows:
+
+|                                   | `server` (torch, ROCm) | `server-gguf` (Q8_0, Vulkan) |
+| --------------------------------- | ---------------------- | ---------------------------- |
+| First audio                       | 350–500 ms             | 230–300 ms                   |
+| Real-time factor                  | 0.55–0.65              | 0.52–0.56                    |
+| Speaker similarity to the dataset | 0.986                  | 0.986                        |
+| Word error rate (GigaAM)          | 0.064                  | 0.071                        |
+
+The voice of a custom-voice fine-tune is one row of the codec embedding. `export_gguf.py` saves that row as `glados.spk`, and the server gives it to the library as a precomputed speaker embedding. `qwen3-tts-cpp.patch` adds four things to the library:
+
+- streaming synthesis from a speaker embedding (`qwen3_tts_synthesize_with_embedding_streaming`);
+- the vocoder weights load into GPU memory (upstream they stay on the CPU unless the GPU is integrated, so the vocoder ran on the CPU);
+- a discrete GPU is chosen before an integrated one;
+- the CLI takes `--speaker <file.spk>` and `-l auto` (no language token, as in training).
+
 ## Versions
 
 Both images use torch 2.11.0 + ROCm 7.2: torchaudio stopped at 2.11, and its binary loads only with the torch it was built for. ROCm 7.2 covers RDNA3 (gfx1100, RX 7900) and RDNA4 (gfx1201, RX 9070). Both images use Transformers 5.15.1 through `qwen-tts-hf`, the Transformers 5 build of `qwen-tts`; newer Transformers break it.
 
 ## Images
 
-`.github/workflows/images.yml` builds `ghcr.io/myrikld/glados-tts-train` and
-`ghcr.io/myrikld/glados-tts-server` on a GitHub-hosted runner and pushes them on
-every change to `main` under `train/`, `server/` or the workflow. Each image is
-about 17 GB, 15 GB of it the ROCm torch layer that both images share, so the job
-first frees disk space and builds both images in one go. Pull requests build
+`.github/workflows/images.yml` builds `ghcr.io/myrikld/glados-tts-train`,
+`ghcr.io/myrikld/glados-tts-server` and `ghcr.io/myrikld/glados-tts-server-gguf`
+on a GitHub-hosted runner and pushes them on every change to `main` under
+`train/`, `server/`, `server-gguf/` or the workflow. The two torch images are
+about 17 GB each, 15 GB of it the ROCm torch layer that they share, so the job
+first frees disk space and builds the images in one go. Pull requests build
 the images without pushing them.

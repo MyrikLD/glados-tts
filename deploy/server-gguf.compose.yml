@@ -1,0 +1,25 @@
+# Wyoming TTS service on qwen3-tts.cpp + Vulkan: the same voice as server.compose.yml without ROCm or torch.
+# Export the checkpoint first: docker compose -f train.compose.yml --profile export run --rm export
+#
+# Env:
+#   DATA_DIR    same folder as for training; the export is read from it
+#   MODEL_DIR   export folder inside the container, e.g. /data/ft/ru/run1/checkpoint-epoch-4/gguf-q8_0
+#   VOICE_LANG  language code the checkpoint was trained on, e.g. ru
+#   RENDER_GID  GID of the host's render group: getent group render | cut -d: -f3
+
+services:
+  glados:
+    image: ${IMAGE:-ghcr.io/myrikld/glados-tts-server-gguf:latest}
+    restart: unless-stopped
+    ports:
+      - "10200:10200"
+    devices:
+      - /dev/dri
+    group_add:
+      - video
+      - ${RENDER_GID}
+    environment:
+      - MODEL_DIR=${MODEL_DIR}
+      - VOICE_LANG=${VOICE_LANG}
+    volumes:
+      - ${DATA_DIR}:/data:ro

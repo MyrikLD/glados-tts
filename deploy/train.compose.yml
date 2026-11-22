@@ -1,5 +1,6 @@
 # One-shot jobs on the GPU host. `docker compose up` runs only `train`;
-# run data prep once per language with `docker compose --profile prep up prep`.
+# run data prep once per language with `docker compose --profile prep up prep`,
+# and export a checkpoint for server-gguf with `CKPT=... docker compose --profile export run --rm export`.
 #
 # Env:
 #   VOICE_LANG  language code of the dataset, e.g. ru, en
@@ -8,6 +9,7 @@
 #   CLIPS_DIR   one language folder from dataset/extract_glados.py, with metadata_clean.csv
 #   STT_URI     optional, tcp://host:port of a Wyoming speech-to-text server to score the test samples
 #   RUN         output folder name under ft/<VOICE_LANG>/
+#   CKPT        export only: checkpoint path inside the container; the export goes to <CKPT>/gguf-q8_0
 #   IMAGE       optional, e.g. a local build: docker build -t glados-tts-train:local train
 #   RUN_AS      optional uid:gid for the files the jobs write, e.g. $(id -u):$(id -g)
 
@@ -51,3 +53,11 @@ services:
     environment:
       <<: *env
       THREADS: "16"
+
+  export:
+    <<: *job
+    profiles: [export]
+    command: ["python", "/app/export_gguf.py"]
+    environment:
+      CKPT: ${CKPT:-}
+      GGUF_TYPE: q8_0

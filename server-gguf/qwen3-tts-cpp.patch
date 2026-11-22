@@ -1,0 +1,241 @@
+diff --git a/src/audio_tokenizer_decoder.cpp b/src/audio_tokenizer_decoder.cpp
+index 6a40ecc..b4ad0a1 100644
+--- a/src/audio_tokenizer_decoder.cpp
++++ b/src/audio_tokenizer_decoder.cpp
+@@ -1,3 +1,4 @@
++#include <vector>
+ #include "audio_tokenizer_decoder.h"
+ #include "gguf_loader.h"
+ #include "ggml-cpu.h"
+@@ -64,29 +65,32 @@ void AudioTokenizerDecoder::unload_model() {
+ void AudioTokenizerDecoder::normalize_codebooks() {
+     const float epsilon = 1e-5f;
+     
++    // Weights may live in device memory, so the codebooks round-trip through host buffers.
+     auto normalize_codebook = [epsilon](struct ggml_tensor * codebook, struct ggml_tensor * usage, const char *) {
+-        if (!codebook || !usage || !codebook->data || !usage->data) return;
+-        
++        if (!codebook || !usage || !codebook->buffer || !usage->buffer) return;
++
+         int64_t codebook_dim = codebook->ne[0];
+         int64_t codebook_size = codebook->ne[1];
+-        
+-        ggml_fp16_t * cb_data = (ggml_fp16_t *)codebook->data;
+-        float * usage_data = (float *)usage->data;
+-        
++
++        std::vector<ggml_fp16_t> cb_data(ggml_nelements(codebook));
++        std::vector<float> usage_data(ggml_nelements(usage));
++        ggml_backend_tensor_get(codebook, cb_data.data(), 0, ggml_nbytes(codebook));
++        ggml_backend_tensor_get(usage, usage_data.data(), 0, ggml_nbytes(usage));
++
+         for (int64_t emb_idx = 0; emb_idx < codebook_size; ++emb_idx) {
+             float u = usage_data[emb_idx];
+             if (u < epsilon) u = epsilon;
+             float inv_u = 1.0f / u;
+-            
++
+             for (int64_t dim_idx = 0; dim_idx < codebook_dim; ++dim_idx) {
+                 int64_t mem_idx = dim_idx + emb_idx * codebook_dim;
+                 float val = ggml_fp16_to_fp32(cb_data[mem_idx]);
+                 cb_data[mem_idx] = ggml_fp32_to_fp16(val * inv_u);
+             }
+         }
+-        
++        ggml_backend_tensor_set(codebook, cb_data.data(), 0, ggml_nbytes(codebook));
+     };
+-    
++
+     normalize_codebook(model_.vq_first_codebook, model_.vq_first_usage, "first");
+     
+     for (int i = 0; i < 15; ++i) {
+@@ -352,17 +356,6 @@ bool AudioTokenizerDecoder::load_model(const std::string & model_path) {
+     }
+     
+     normalize_codebooks();
+-    // Codebooks are normalized in host memory; sync once to backend tensors.
+-    auto upload_if_present = [](struct ggml_tensor * t) {
+-        if (t && t->data) {
+-            ggml_backend_tensor_set(t, t->data, 0, ggml_nbytes(t));
+-        }
+-    };
+-    upload_if_present(model_.vq_first_codebook);
+-    for (int i = 0; i < 15; ++i) {
+-        upload_if_present(model_.vq_rest_codebook[i]);
+-    }
+-    
+     state_.backend = init_preferred_backend("AudioTokenizerDecoder", &error_msg_);
+     if (!state_.backend) {
+         return false;
+diff --git a/src/gguf_loader.cpp b/src/gguf_loader.cpp
+index ff62052..b0e2b9b 100644
+--- a/src/gguf_loader.cpp
++++ b/src/gguf_loader.cpp
+@@ -137,9 +137,14 @@ ggml_backend_t init_tensor_loader_backend(enum ggml_backend_dev_type preferred_b
+         return backend;
+     }
+ 
+-    ggml_backend_t backend = ggml_backend_init_by_type(preferred_backend_type, nullptr);
+-    if (!backend && preferred_backend_type != GGML_BACKEND_DEVICE_TYPE_CPU) {
+-        backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
++    if (preferred_backend_type == GGML_BACKEND_DEVICE_TYPE_CPU) {
++        return ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
++    }
++    // Same order as init_preferred_backend(), so weights land on the device that computes with them.
++    ggml_backend_t backend = nullptr;
++    for (auto type : {GGML_BACKEND_DEVICE_TYPE_GPU, GGML_BACKEND_DEVICE_TYPE_IGPU, GGML_BACKEND_DEVICE_TYPE_ACCEL, GGML_BACKEND_DEVICE_TYPE_CPU}) {
++        if (backend) break;
++        backend = ggml_backend_init_by_type(type, nullptr);
+     }
+     return backend;
+ }
+@@ -171,9 +176,10 @@ ggml_backend_t init_preferred_backend(const char * component_name, std::string *
+             backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_CPU, nullptr);
+         }
+     } else {
+-        backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU, nullptr);
++        // A discrete GPU beats the integrated one when a machine has both.
++        backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
+         if (!backend) {
+-            backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_GPU, nullptr);
++            backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU, nullptr);
+         }
+         if (!backend) {
+             backend = ggml_backend_init_by_type(GGML_BACKEND_DEVICE_TYPE_ACCEL, nullptr);
+diff --git a/src/main.cpp b/src/main.cpp
+index 8e5e6a4..10d1353 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -58,6 +58,7 @@ int main(int argc, char ** argv) {
+     std::string text;
+     std::string output_file = "output.wav";
+     std::string reference_audio;
++    std::string speaker_file;
+     std::string ref_text;
+     std::string instruct_text;
+     bool stream_mode = false;
+@@ -94,6 +95,9 @@ int main(int argc, char ** argv) {
+             output_file = argv[i];
+         } else if (arg == "--stream") {
+             stream_mode = true;
++        } else if (arg == "--speaker") {
++            if (++i >= argc) { fprintf(stderr, "Error: missing speaker file\n"); return 1; }
++            speaker_file = argv[i];
+         } else if (arg == "-r" || arg == "--reference") {
+             if (++i >= argc) {
+                 fprintf(stderr, "Error: missing reference audio\n");
+@@ -160,7 +164,8 @@ int main(int argc, char ** argv) {
+                 return 1;
+             }
+             std::string lang = argv[i];
+-            if (lang == "en" || lang == "english")       params.language_id = 2050;
++            if (lang == "auto") params.language_id = -1;
++            else if (lang == "en" || lang == "english") params.language_id = 2050;
+             else if (lang == "ru" || lang == "russian")  params.language_id = 2069;
+             else if (lang == "zh" || lang == "chinese")  params.language_id = 2055;
+             else if (lang == "ja" || lang == "japanese")  params.language_id = 2058;
+@@ -228,6 +233,15 @@ int main(int argc, char ** argv) {
+         result = stream_mode
+             ? tts.synthesize_voice_design(text, instruct_text, params, stream_cli_callback)
+             : tts.synthesize_voice_design(text, instruct_text, params);
++    } else if (!speaker_file.empty()) {
++        FILE * f = fopen(speaker_file.c_str(), "rb");
++        uint32_t n = 0;
++        if (!f || fread(&n, 4, 1, f) != 1) { fprintf(stderr, "Error: cannot read %s\n", speaker_file.c_str()); return 1; }
++        std::vector<float> emb(n);
++        if (fread(emb.data(), sizeof(float), n, f) != n) { fprintf(stderr, "Error: short speaker file\n"); return 1; }
++        fclose(f);
++        fprintf(stderr, "Synthesizing with speaker embedding (%u floats): \"%s\"\n", n, text.c_str());
++        result = tts.synthesize_with_embedding(text, emb.data(), (int32_t)n, params);
+     } else if (reference_audio.empty()) {
+         fprintf(stderr, "Synthesizing: \"%s\"\n", text.c_str());
+         result = stream_mode
+diff --git a/src/qwen3_tts.cpp b/src/qwen3_tts.cpp
+index 56609ca..35d89cf 100644
+--- a/src/qwen3_tts.cpp
++++ b/src/qwen3_tts.cpp
+@@ -436,7 +436,8 @@ bool Qwen3TTS::extract_speaker_embedding(const float * ref_samples, int32_t n_re
+ 
+ tts_result Qwen3TTS::synthesize_with_embedding(const std::string & text,
+                                                 const float * embedding, int32_t embedding_size,
+-                                                const tts_params & params) {
++                                                const tts_params & params,
++                                                const StreamingAudioCallback & on_audio) {
+     tts_result result;
+ 
+     if (!models_loaded_) {
+@@ -449,7 +450,7 @@ tts_result Qwen3TTS::synthesize_with_embedding(const std::string & text,
+         return result;
+     }
+ 
+-    return synthesize_internal(text, embedding, params, result);
++    return synthesize_internal(text, embedding, params, result, "", on_audio ? &on_audio : nullptr);
+ }
+ 
+ tts_result Qwen3TTS::synthesize_voice_design(const std::string & text,
+diff --git a/src/qwen3_tts.h b/src/qwen3_tts.h
+index 09e6fbc..6bf9cbf 100644
+--- a/src/qwen3_tts.h
++++ b/src/qwen3_tts.h
+@@ -141,7 +141,8 @@ public:
+     // embedding_size: must match hidden_size (typically 1024)
+     tts_result synthesize_with_embedding(const std::string & text,
+                                           const float * embedding, int32_t embedding_size,
+-                                          const tts_params & params = tts_params());
++                                          const tts_params & params = tts_params(),
++                                          const StreamingAudioCallback & on_audio = nullptr);
+ 
+     /// Generate speech with in-context voice cloning (ICL mode).
+     /// Combines speaker embedding + reference codec tokens + transcript
+diff --git a/src/qwen3tts_c_api.cpp b/src/qwen3tts_c_api.cpp
+index db82fdf..1aaf5fd 100644
+--- a/src/qwen3tts_c_api.cpp
++++ b/src/qwen3tts_c_api.cpp
+@@ -289,6 +289,27 @@ Qwen3TtsAudio * qwen3_tts_synthesize_with_embedding(
+     return out;
+ }
+ 
++Qwen3TtsAudio * qwen3_tts_synthesize_with_embedding_streaming(
++        Qwen3Tts * tts, const char * text,
++        const float * embedding, int32_t embedding_size,
++        const Qwen3TtsParams * params,
++        qwen3_tts_stream_callback callback, void * user_data) {
++    if (!tts || !text || !embedding || embedding_size <= 0 || !callback) return nullptr;
++    AUTORELEASE_BEGIN
++    auto cpp_params = to_cpp_params(params);
++    auto result = tts->engine.synthesize_with_embedding(
++        text, embedding, embedding_size, cpp_params,
++        [&](const float * samples, size_t n) -> bool {
++            return callback(samples, (int32_t)n, user_data) != 0;
++        });
++    if (!result.success) {
++        tts->last_error = result.error_msg;
++    }
++    auto * out = to_c_audio(result);
++    AUTORELEASE_END
++    return out;
++}
++
+ const char * qwen3_tts_get_error(const Qwen3Tts * tts) {
+     if (!tts) return "";
+     return tts->last_error.c_str();
+diff --git a/src/qwen3tts_c_api.h b/src/qwen3tts_c_api.h
+index 8489986..bab4356 100644
+--- a/src/qwen3tts_c_api.h
++++ b/src/qwen3tts_c_api.h
+@@ -145,6 +145,15 @@ Qwen3TtsAudio* qwen3_tts_synthesize_in_context_streaming(
+     qwen3_tts_stream_callback callback,
+     void* user_data);
+ 
++Qwen3TtsAudio* qwen3_tts_synthesize_with_embedding_streaming(
++    Qwen3Tts* tts,
++    const char* text,
++    const float* embedding,
++    int32_t embedding_size,
++    const Qwen3TtsParams* params,
++    qwen3_tts_stream_callback callback,
++    void* user_data);
++
+ #ifdef __cplusplus
+ }
+ #endif
