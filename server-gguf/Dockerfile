@@ -13,7 +13,8 @@ RUN git clone https://github.com/predict-woo/qwen3-tts.cpp.git /src \
  && git -C /src submodule update --init \
  && git -C /src apply /tmp/qwen3-tts-cpp.patch
 WORKDIR /src
-RUN cmake -S ggml -B ggml/build -DGGML_VULKAN=ON -DCMAKE_BUILD_TYPE=Release \
+# GGML_NATIVE=OFF: a native build targets the CI runner's CPU and dies with SIGILL on hosts that lack its instructions.
+RUN cmake -S ggml -B ggml/build -DGGML_VULKAN=ON -DGGML_NATIVE=OFF -DCMAKE_BUILD_TYPE=Release \
  && cmake --build ggml/build -j"$(nproc)" \
  && cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
  && cmake --build build -j"$(nproc)" --target qwen3tts_shared qwen3-tts-cli \
