@@ -25,8 +25,31 @@ jobs:
           uvx ruff check .
           uvx ruff format --check .
 
-  images:
-    needs: lint
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      torch: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.torch == 'true' }}
+      gguf: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.gguf == 'true' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4.0.3
+        id: filter
+        with:
+          filters: |
+            torch:
+              - "train/**"
+              - "server/**"
+              - ".github/workflows/images.yml"
+            gguf:
+              - "server-gguf/**"
+              - ".github/workflows/images.yml"
+
+  torch-images:
+    needs: [lint, changes]
+    if: needs.changes.outputs.torch == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,11 +67,11 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # One job builds the images in turn, so server reuses the torch layer of train.
+      # One job builds both images in turn, so server reuses the torch layer of train.
       - name: Build
         run: |
           OWNER=${GITHUB_REPOSITORY_OWNER,,}
-          for name in train server server-gguf; do
+          for name in train server; do
             image=ghcr.io/$OWNER/glados-tts-$name
             docker build -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" "$name"
           done
@@ -58,6 +81,29 @@ jobs:
         if: github.event_name != 'pull_request'
         run: |
           OWNER=${GITHUB_REPOSITORY_OWNER,,}
-          for name in train server server-gguf; do
+          for name in train server; do
             docker push --all-tags "ghcr.io/$OWNER/glados-tts-$name"
           done
+
+  gguf-image:
+    needs: [lint, changes]
+    if: needs.changes.outputs.gguf == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        run: |
+          image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/glados-tts-server-gguf
+          docker build -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" server-gguf
+      - name: Push
+        if: github.event_name != 'pull_request'
+        run: docker push --all-tags "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/glados-tts-server-gguf"

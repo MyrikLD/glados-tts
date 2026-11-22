@@ -111,10 +111,15 @@ Both images use torch 2.11.0 + ROCm 7.2: torchaudio stopped at 2.11, and its bin
 
 ## Images
 
-`.github/workflows/images.yml` builds `ghcr.io/myrikld/glados-tts-train`,
-`ghcr.io/myrikld/glados-tts-server` and `ghcr.io/myrikld/glados-tts-server-gguf`
-on a GitHub-hosted runner and pushes them on every change to `main` under
-`train/`, `server/`, `server-gguf/` or the workflow. The two torch images are
-about 17 GB each, 15 GB of it the ROCm torch layer that they share, so the job
-first frees disk space and builds the images in one go. Pull requests build
-the images without pushing them.
+`.github/workflows/images.yml` builds the images on GitHub-hosted runners and
+pushes them to `ghcr.io/myrikld/` on every change to `main`. Two jobs run in
+parallel, and each one only when its files change (a change to the workflow,
+or a manual run, builds everything):
+
+- `torch-images` builds `glados-tts-train` and `glados-tts-server` when `train/`
+  or `server/` changes. Each is about 17 GB, 15 GB of it the ROCm torch layer
+  they share, so the job first frees disk space and builds both in one go.
+- `gguf-image` builds `glados-tts-server-gguf` when `server-gguf/` changes, in a
+  few minutes.
+
+Pull requests build the images without pushing them.
