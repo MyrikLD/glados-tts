@@ -97,10 +97,12 @@ On an RX 9070 XT, with the same checkpoint and phrases, the two servers compare 
 | Speaker similarity to the dataset | 0.986                  | 0.986                        |
 | Word error rate (GigaAM)          | 0.064                  | 0.071                        |
 
+On an RX 7900 XTX (8 CPU cores), the torch server gives a real-time factor of 0.7–0.95. The GGUF server gives the first audio in 370–600 ms and a real-time factor of 0.56–0.68, and the streamed chunks arrive before the audio before them has finished playing.
+
 The voice of a custom-voice fine-tune is one row of the codec embedding. `export_gguf.py` saves that row as `glados.spk`, and the server gives it to the library as a precomputed speaker embedding. `qwen3-tts-cpp.patch` changes six things in the library:
 
 - streaming synthesis from a speaker embedding (`qwen3_tts_synthesize_with_embedding_streaming`);
-- streamed chunks that start small and double (`QWEN3_TTS_STREAM_FIRST_CHUNK_FRAMES`, then up to `QWEN3_TTS_STREAM_CHUNK_FRAMES`). Each chunk also re-decodes 48 frames of context, so a steady 8-frame chunk made the vocoder do about 7 times the work and fell behind real time on an RX 7900 XTX;
+- streamed chunks that start small and grow by half each time (`QWEN3_TTS_STREAM_FIRST_CHUNK_FRAMES`, then up to `QWEN3_TTS_STREAM_CHUNK_FRAMES`). Each chunk also re-decodes 48 frames of context, so a steady 8-frame chunk made the vocoder do about 7 times the work and fell behind real time on an RX 7900 XTX;
 - the vocoder weights load into GPU memory (upstream they stay on the CPU unless the GPU is integrated, so the vocoder ran on the CPU);
 - a discrete GPU is chosen before an integrated one;
 - the CLI takes `--speaker <file.spk>` and `-l auto` (no language token, as in training).

@@ -166,7 +166,7 @@ index 8e5e6a4..7c469b3 100644
          fprintf(stderr, "Synthesizing: \"%s\"\n", text.c_str());
          result = stream_mode
 diff --git a/src/qwen3_tts.cpp b/src/qwen3_tts.cpp
-index 56609ca..0304b69 100644
+index 56609ca..76b6f1c 100644
 --- a/src/qwen3_tts.cpp
 +++ b/src/qwen3_tts.cpp
 @@ -1,3 +1,4 @@
@@ -179,7 +179,7 @@ index 56609ca..0304b69 100644
      return v;
  }
 +// Each window also re-decodes the warmup context, so small chunks multiply vocoder work. Only the
-+// first chunk needs to be small (it sets time to first audio). Each later chunk doubles, up to
++// first chunk needs to be small (it sets time to first audio). Each later chunk grows by half, up to
 +// stream_chunk_frames(), so it is ready before the audio already sent has finished playing.
 +int stream_first_chunk_frames() {
 +    static const int v = [] {
@@ -194,17 +194,19 @@ index 56609ca..0304b69 100644
  }  // namespace
  
  struct StreamDecoderDriver {
-@@ -294,7 +308,8 @@ struct StreamDecoderDriver {
+@@ -294,7 +308,10 @@ struct StreamDecoderDriver {
  
      bool on_frame(const int32_t * codes_total, int32_t n_frames) {
          if (aborted || failed) return false;
 -        if (n_frames - emitted < stream_chunk_frames()) return true;
-+        const int chunk = std::min(stream_chunk_frames(), stream_first_chunk_frames() << chunks);
++        int chunk = stream_first_chunk_frames();
++        for (int i = 0; i < chunks && chunk < stream_chunk_frames(); ++i) chunk += chunk / 2;
++        chunk = std::min(stream_chunk_frames(), chunk);
 +        if (n_frames - emitted < chunk) return true;
          // hold chunks that fall entirely inside the non-delivered prefix
          if (n_frames <= deliver_from) return true;
          std::vector<float> new_samples;
-@@ -436,7 +451,8 @@ bool Qwen3TTS::extract_speaker_embedding(const float * ref_samples, int32_t n_re
+@@ -436,7 +453,8 @@ bool Qwen3TTS::extract_speaker_embedding(const float * ref_samples, int32_t n_re
  
  tts_result Qwen3TTS::synthesize_with_embedding(const std::string & text,
                                                  const float * embedding, int32_t embedding_size,
@@ -214,7 +216,7 @@ index 56609ca..0304b69 100644
      tts_result result;
  
      if (!models_loaded_) {
-@@ -449,7 +465,7 @@ tts_result Qwen3TTS::synthesize_with_embedding(const std::string & text,
+@@ -449,7 +467,7 @@ tts_result Qwen3TTS::synthesize_with_embedding(const std::string & text,
          return result;
      }
  
