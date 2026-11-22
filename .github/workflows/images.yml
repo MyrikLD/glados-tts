@@ -1,14 +1,14 @@
 name: Images
 
-# Builds run on a self-hosted runner on the GPU host. There is no pull_request trigger
-# on purpose: in a public repo it would let any fork run code on that machine.
 on:
   push:
     branches: [main]
-    paths:
+    paths: &paths
       - "train/**"
       - "server/**"
       - ".github/workflows/images.yml"
+  pull_request:
+    paths: *paths
   workflow_dispatch:
 
 permissions:
@@ -24,33 +24,39 @@ jobs:
           uvx ruff check .
           uvx ruff format --check .
 
-  image:
+  images:
     needs: lint
-    runs-on: [self-hosted, glados-tts]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: glados-tts-train
-            context: train
-          - name: glados-tts-server
-            context: server
     steps:
+      # The ROCm torch layer alone is about 15 GB; the stock runner has too little free disk for it.
+      - uses: jlumbroso/free-disk-space@v2.0.0
+        with:
+          tool-cache: true
+          swap-storage: true
       - uses: actions/checkout@v7
       - uses: docker/login-action@v4
+        if: github.event_name != 'pull_request'
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # One job builds both images in turn, so the second one reuses the torch layer of the first.
       - name: Build
-        env:
-          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
         run: |
-          IMAGE=${IMAGE,,}
-          # The host's own layer cache keeps the multi-GB ROCm torch layer between runs.
-          docker build --pull -t "$IMAGE:latest" -t "$IMAGE:sha-${GITHUB_SHA::7}" ${{ matrix.context }}
-          docker push "$IMAGE:latest"
-          docker push "$IMAGE:sha-${GITHUB_SHA::7}"
+          OWNER=${GITHUB_REPOSITORY_OWNER,,}
+          for name in train server; do
+            image=ghcr.io/$OWNER/glados-tts-$name
+            docker build -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" "$name"
+          done
+          docker image ls
+          df -h /
+      - name: Push
+        if: github.event_name != 'pull_request'
+        run: |
+          OWNER=${GITHUB_REPOSITORY_OWNER,,}
+          for name in train server; do
+            docker push --all-tags "ghcr.io/$OWNER/glados-tts-$name"
+          done
