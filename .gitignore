@@ -1,0 +1,15 @@
+# Game audio and subtitle text are Valve's; generate them locally with dataset/extract_glados.py.
+*.wav
+*.mp3
+*.ogg
+metadata*.csv
+no_text.txt
+speaker_sim.csv
+dropped.csv
+*.npy
+en/
+ru/
+
+__pycache__/
+.venv/
+.ruff_cache/

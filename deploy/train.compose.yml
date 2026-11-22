@@ -1,0 +1,53 @@
+# One-shot jobs on the GPU host. `docker compose up` runs only `train`;
+# run data prep once per language with `docker compose --profile prep up prep`.
+#
+# Env:
+#   VOICE_LANG  language code of the dataset, e.g. ru, en
+#   RENDER_GID  GID of the host's render group: getent group render | cut -d: -f3
+#   DATA_DIR    holds hf/ (model cache) and ft/<VOICE_LANG>/ (wavs, train_with_codes.jsonl, runs)
+#   CLIPS_DIR   one language folder from dataset/extract_glados.py, with metadata_clean.csv
+#   STT_URI     optional, tcp://host:port of a Wyoming speech-to-text server to score the test samples
+#   RUN         output folder name under ft/<VOICE_LANG>/
+#   IMAGE       optional, e.g. a local build: docker build -t glados-tts-train:local train
+#   RUN_AS      optional uid:gid for the files the jobs write, e.g. $(id -u):$(id -g)
+
+x-job: &job
+  image: ${IMAGE:-ghcr.io/myrikld/glados-tts-train:latest}
+  user: ${RUN_AS:-0:0}
+  restart: "no"
+  devices:
+    - /dev/kfd
+    - /dev/dri
+  group_add:
+    - video
+    - ${RENDER_GID}
+  shm_size: 8g
+  volumes:
+    - ${DATA_DIR}:/data
+    - ${CLIPS_DIR}:/ref:ro
+
+x-env: &env
+  VOICE_LANG: ${VOICE_LANG}
+  FT_DIR: /data/ft/${VOICE_LANG}
+
+services:
+  train:
+    <<: *job
+    command: ["python", "/app/train.py"]
+    environment:
+      <<: *env
+      STT_URI: ${STT_URI:-}
+      RUN: ${RUN:-run1}
+      BASE: Qwen/Qwen3-TTS-12Hz-0.6B-Base
+      BATCH: "2"
+      LR: "1e-5"
+      EPOCHS: "5"
+
+  prep:
+    <<: *job
+    profiles: [prep]
+    command: ["python", "/app/prep.py"]
+    cpus: 16
+    environment:
+      <<: *env
+      THREADS: "16"

@@ -1,0 +1,56 @@
+name: Images
+
+# Builds run on a self-hosted runner on the GPU host. There is no pull_request trigger
+# on purpose: in a public repo it would let any fork run code on that machine.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "train/**"
+      - "server/**"
+      - ".github/workflows/images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10
+      - run: |
+          uvx ruff check .
+          uvx ruff format --check .
+
+  image:
+    needs: lint
+    runs-on: [self-hosted, glados-tts]
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: glados-tts-train
+            context: train
+          - name: glados-tts-server
+            context: server
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build
+        env:
+          IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+        run: |
+          IMAGE=${IMAGE,,}
+          # The host's own layer cache keeps the multi-GB ROCm torch layer between runs.
+          docker build --pull -t "$IMAGE:latest" -t "$IMAGE:sha-${GITHUB_SHA::7}" ${{ matrix.context }}
+          docker push "$IMAGE:latest"
+          docker push "$IMAGE:sha-${GITHUB_SHA::7}"

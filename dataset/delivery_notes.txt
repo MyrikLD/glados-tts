@@ -1,0 +1,5 @@
+coop_misc10
+coop_privatetalk_mix01
+dlc1_leaderboard07
+dlc1_leaderboard21
+mp_coop_paint_walljumps04

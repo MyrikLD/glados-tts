@@ -1,0 +1,12 @@
+[project]
+name = "glados-tts"
+version = "0.1.0"
+description = "GLaDOS voice in any Portal 2 dub language: dataset tools, Qwen3-TTS fine-tuning on ROCm, Wyoming TTS server"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 140
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B"]
