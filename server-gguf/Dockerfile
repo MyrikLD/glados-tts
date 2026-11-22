@@ -31,9 +31,9 @@ RUN apt-get update \
  && pip install --no-cache-dir --break-system-packages wyoming==1.11.0 numpy==2.5.5
 LABEL org.opencontainers.image.source=https://github.com/MyrikLD/glados-tts
 COPY --from=build /out /app
-# Streamed chunks of 12, 18, 27, then 32 codec frames: the first one is small for a fast start, later ones
+# Streamed chunks of 8, 12, 18, 27, then 32 codec frames: the first one is small for a fast start, later ones
 # are larger because every chunk also re-decodes 48 frames of context.
-ENV LD_LIBRARY_PATH=/app/lib PYTHONUNBUFFERED=1 QWEN3_TTS_STREAM_FIRST_CHUNK_FRAMES=12 QWEN3_TTS_STREAM_CHUNK_FRAMES=32
+ENV LD_LIBRARY_PATH=/app/lib PYTHONUNBUFFERED=1 QWEN3_TTS_STREAM_FIRST_CHUNK_FRAMES=8 QWEN3_TTS_STREAM_CHUNK_FRAMES=32
 COPY server.py /app/server.py
 EXPOSE 10200
 CMD ["python3", "/app/server.py"]

@@ -12,7 +12,7 @@ index e1b58b1..389f3aa 100644
  endif()
  
 diff --git a/src/audio_tokenizer_decoder.cpp b/src/audio_tokenizer_decoder.cpp
-index 6a40ecc..b4ad0a1 100644
+index 6a40ecc..66625f9 100644
 --- a/src/audio_tokenizer_decoder.cpp
 +++ b/src/audio_tokenizer_decoder.cpp
 @@ -1,3 +1,4 @@
@@ -80,6 +80,67 @@ index 6a40ecc..b4ad0a1 100644
      state_.backend = init_preferred_backend("AudioTokenizerDecoder", &error_msg_);
      if (!state_.backend) {
          return false;
+@@ -511,6 +504,42 @@ struct ggml_tensor * AudioTokenizerDecoder::apply_pre_tfm_layer(struct ggml_cont
+     return ggml_add(ctx, residual, ffn_out);
+ }
+ 
++
++// Transposed 1D convolution (no padding, no dilation) as one matrix product and an overlap-add.
++// x is [T, C_in], w is [K, C_out, C_in]; the result is [(T - 1) * stride + K, C_out].
++// GGML_OP_CONV_TRANSPOSE_1D is slow on Vulkan (one invocation per output channel) and runs there only
++// with F32 weights, so the vocoder spent most of its time in it or fell back to the CPU.
++static struct ggml_tensor * conv_transpose_1d(struct ggml_context * ctx, struct ggml_tensor * w,
++                                              struct ggml_tensor * x, int stride) {
++    const int64_t K = w->ne[0];
++    const int64_t c_out = w->ne[1];
++    const int64_t c_in = w->ne[2];
++    const int64_t T = x->ne[0];
++    if (K % stride != 0) {
++        struct ggml_tensor * w32 = w->type == GGML_TYPE_F32 ? w : ggml_cast(ctx, w, GGML_TYPE_F32);
++        return ggml_conv_transpose_1d(ctx, w32, x, stride, 0, 1);
++    }
++
++    // taps[k + K * o, t] = sum_i w[k, o, i] * x[t, i]
++    struct ggml_tensor * wt = ggml_cont(ctx, ggml_transpose(ctx, ggml_reshape_2d(ctx, w, K * c_out, c_in)));
++    struct ggml_tensor * xt = ggml_cont(ctx, ggml_transpose(ctx, x));
++    struct ggml_tensor * taps = ggml_reshape_3d(ctx, ggml_mul_mat(ctx, wt, xt), K, c_out, T);
++
++    // Tap k of input step t lands on output sample t * stride + k. Taps [g * stride, (g + 1) * stride)
++    // form one stride-long frame per input step, shifted by g frames.
++    const int64_t groups = K / stride;
++    struct ggml_tensor * out = nullptr;
++    for (int64_t g = 0; g < groups; ++g) {
++        struct ggml_tensor * part = ggml_view_3d(ctx, taps, stride, c_out, T, taps->nb[1], taps->nb[2],
++                                                 g * stride * taps->nb[0]);
++        part = ggml_cont(ctx, ggml_permute(ctx, part, 0, 2, 1, 3));
++        part = ggml_reshape_2d(ctx, part, stride * T, c_out);
++        part = ggml_pad_ext(ctx, part, (int)(g * stride), (int)((groups - 1 - g) * stride), 0, 0, 0, 0, 0, 0);
++        out = out ? ggml_add(ctx, out, part) : part;
++    }
++    return out;
++}
++
+ struct ggml_tensor * AudioTokenizerDecoder::apply_upsample_block(struct ggml_context * ctx,
+                                                                    struct ggml_tensor * x,
+                                                                    const upsample_block & block,
+@@ -519,7 +548,7 @@ struct ggml_tensor * AudioTokenizerDecoder::apply_upsample_block(struct ggml_con
+     int64_t channels = x->ne[1];
+     
+      struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, channels);
+-     x_2d = ggml_conv_transpose_1d(ctx, block.conv_w, x_2d, 2, 0, 1);
++     x_2d = conv_transpose_1d(ctx, block.conv_w, x_2d, 2);
+      
+      int64_t new_seq_len = x_2d->ne[0];
+      x = ggml_reshape_3d(ctx, x_2d, new_seq_len, channels, 1);
+@@ -617,7 +646,7 @@ struct ggml_tensor * AudioTokenizerDecoder::apply_decoder_block(struct ggml_cont
+      int kernel_size = block.conv_t_w->ne[0];
+      
+      struct ggml_tensor * x_2d = ggml_reshape_2d(ctx, x, seq_len, in_channels);
+-     x_2d = ggml_conv_transpose_1d(ctx, block.conv_t_w, x_2d, upsample_rate, 0, 1);
++     x_2d = conv_transpose_1d(ctx, block.conv_t_w, x_2d, upsample_rate);
+      
+      int64_t new_seq_len = x_2d->ne[0];
+      x = ggml_reshape_3d(ctx, x_2d, new_seq_len, out_channels, 1);
 diff --git a/src/gguf_loader.cpp b/src/gguf_loader.cpp
 index ff62052..b0e2b9b 100644
 --- a/src/gguf_loader.cpp
