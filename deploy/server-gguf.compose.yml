@@ -1,4 +1,4 @@
-# Wyoming TTS service on qwen3-tts.cpp + Vulkan: the same voice as server.compose.yml without ROCm or torch.
+# Wyoming TTS service on qwen3-tts.cpp + Vulkan.
 # Export the checkpoint first: docker compose -f train.compose.yml --profile export run --rm export
 #
 # Env:

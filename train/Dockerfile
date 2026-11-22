@@ -6,8 +6,8 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ffmpeg libsndfile1 sox git \
  && rm -rf /var/lib/apt/lists/*
 
-# Same torch line as server/Dockerfile, so both images share this layer. torchaudio stopped at 2.11
-# and its binary loads only with the torch it was built for, so torch stays at 2.11 too.
+# torchaudio stopped at 2.11 and its binary loads only with the torch it was built for, so torch
+# stays at 2.11 too.
 RUN pip install torch==2.11.0 torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/rocm7.2
 
 # qwen-tts-hf is the Transformers 5 build of qwen-tts (same `qwen_tts` module); official qwen-tts

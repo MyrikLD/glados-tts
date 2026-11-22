@@ -5,7 +5,6 @@ on:
     branches: [main]
     paths: &paths
       - "train/**"
-      - "server/**"
       - "server-gguf/**"
       - ".github/workflows/images.yml"
   pull_request:
@@ -31,7 +30,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      torch: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.torch == 'true' }}
+      train: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.train == 'true' }}
       gguf: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.gguf == 'true' }}
     steps:
       - uses: actions/checkout@v7
@@ -39,17 +38,16 @@ jobs:
         id: filter
         with:
           filters: |
-            torch:
+            train:
               - "train/**"
-              - "server/**"
               - ".github/workflows/images.yml"
             gguf:
               - "server-gguf/**"
               - ".github/workflows/images.yml"
 
-  torch-images:
+  train-image:
     needs: [lint, changes]
-    if: needs.changes.outputs.torch == 'true'
+    if: needs.changes.outputs.train == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -67,23 +65,14 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # One job builds both images in turn, so server reuses the torch layer of train.
       - name: Build
         run: |
-          OWNER=${GITHUB_REPOSITORY_OWNER,,}
-          for name in train server; do
-            image=ghcr.io/$OWNER/glados-tts-$name
-            docker build -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" "$name"
-          done
-          docker image ls
+          image=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/glados-tts-train
+          docker build -t "$image:latest" -t "$image:sha-${GITHUB_SHA::7}" train
           df -h /
       - name: Push
         if: github.event_name != 'pull_request'
-        run: |
-          OWNER=${GITHUB_REPOSITORY_OWNER,,}
-          for name in train server; do
-            docker push --all-tags "ghcr.io/$OWNER/glados-tts-$name"
-          done
+        run: docker push --all-tags "ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/glados-tts-train"
 
   gguf-image:
     needs: [lint, changes]
