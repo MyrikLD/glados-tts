@@ -97,7 +97,7 @@ On an RX 9070 XT, with the same checkpoint and phrases, the two servers compare 
 | Speaker similarity to the dataset | 0.986                  | 0.986                        |
 | Word error rate (GigaAM)          | 0.064                  | 0.071                        |
 
-On an RX 7900 XTX (8 CPU cores), the torch server gives the first audio in about 400 ms and a real-time factor of 0.7–0.95. The GGUF server gives the first audio in 510–640 ms and a real-time factor of 0.6–0.75. In about one long phrase out of five, the second chunk comes up to 200 ms after the first one has finished playing.
+On an RX 7900 XTX (8 CPU cores), the torch server gives the first audio in about 400 ms and a real-time factor of 0.7–0.95. The GGUF server gives the first audio in 190–260 ms and a real-time factor of 0.27–0.34, and every streamed chunk arrives before the audio before it has finished playing.
 
 The voice of a custom-voice fine-tune is one row of the codec embedding. `export_gguf.py` saves that row as `glados.spk`, and the server gives it to the library as a precomputed speaker embedding. `qwen3-tts-cpp.patch` changes seven things in the library:
 
