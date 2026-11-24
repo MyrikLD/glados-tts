@@ -92,13 +92,10 @@ With the Q8_0 export of the published checkpoint:
 
 The checkpoint itself, run through torch, gives a speaker similarity of 0.986 and a word error rate of 0.064. Every streamed chunk arrives before the audio before it has finished playing.
 
-The voice of a custom-voice fine-tune is one row of the codec embedding. `export_gguf.py` saves that row as `glados.spk`, and the server gives it to the library as a precomputed speaker embedding. `qwen3-tts-cpp.patch` changes seven things in the library:
+The voice of a custom-voice fine-tune is one row of the codec embedding. `export_gguf.py` saves that row as `glados.spk`, and the server gives it to the library as a precomputed speaker embedding. `qwen3-tts-cpp.patch` changes four things in the library:
 
 - streaming synthesis from a speaker embedding (`qwen3_tts_synthesize_with_embedding_streaming`);
 - streamed chunks that start small and grow by half each time (`QWEN3_TTS_STREAM_FIRST_CHUNK_FRAMES`, then up to `QWEN3_TTS_STREAM_CHUNK_FRAMES`). Each chunk also re-decodes 48 frames of context, so a steady 8-frame chunk made the vocoder do about 7 times the work and fell behind real time on an RX 7900 XTX;
-- transposed convolutions of the vocoder run as a matrix product and an overlap-add. The Vulkan backend computes `CONV_TRANSPOSE_1D` with one GPU thread per output channel and only with F32 weights, so the F16 vocoder ran these layers on the CPU;
-- the vocoder weights load into GPU memory (upstream they stay on the CPU unless the GPU is integrated, so the vocoder ran on the CPU);
-- a discrete GPU is chosen before an integrated one;
 - the CLI takes `--speaker <file.spk>` and `-l auto` (no language token, as in training).
 - the library builds for x86-64-v3 (AVX2) instead of the build machine's CPU, so an image built on CI runs on older hosts.
 

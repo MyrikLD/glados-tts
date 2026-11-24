@@ -23,7 +23,7 @@ RUN git clone https://github.com/QwenLM/Qwen3-TTS.git /opt/Qwen3-TTS \
  && cp -r /opt/Qwen3-TTS/finetuning /app/finetuning
 
 # export_gguf.py runs the GGUF converters of the qwen3-tts.cpp commit that server-gguf builds.
-ARG QWEN3_TTS_CPP_COMMIT=8fa5b30604b67b82fd9df7c30c91e78b42b54571
+ARG QWEN3_TTS_CPP_COMMIT=46d02251a934d5c1e97d352a0caba30494244698
 RUN pip install gguf==0.19.0 tqdm==4.70.1 \
  && git clone https://github.com/predict-woo/qwen3-tts.cpp.git /opt/qwen3-tts.cpp \
  && git -C /opt/qwen3-tts.cpp checkout "$QWEN3_TTS_CPP_COMMIT"

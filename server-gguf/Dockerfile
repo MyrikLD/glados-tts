@@ -6,7 +6,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # The patch is made against this commit (and the ggml commit it pins as a submodule).
-ARG QWEN3_TTS_CPP_COMMIT=8fa5b30604b67b82fd9df7c30c91e78b42b54571
+ARG QWEN3_TTS_CPP_COMMIT=46d02251a934d5c1e97d352a0caba30494244698
 COPY qwen3-tts-cpp.patch /tmp/
 RUN git clone https://github.com/predict-woo/qwen3-tts.cpp.git /src \
  && git -C /src checkout "$QWEN3_TTS_CPP_COMMIT" \
